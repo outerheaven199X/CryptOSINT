@@ -1,0 +1,7 @@
+name = "cryptosint"
+compatibility_date = "2024-12-01"
+pages_build_output_dir = "dist"
+
+[[kv_namespaces]]
+binding = "SKNWLKR_CACHE"
+id = "6d429aac7d464911a8b9f8a5bac16fe3"
