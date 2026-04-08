@@ -190,9 +190,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return response;
   } catch (err: any) {
     console.error("Scan error:", err);
+    const msg: string = err.message || "";
+    const friendly = msg.includes("RecordNotFound") || msg.includes("Asset Not Found")
+      ? "Not a valid token address"
+      : msg || "Internal server error";
     return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
-      { status: 500, headers: corsHeaders }
+      JSON.stringify({ error: friendly }),
+      { status: 400, headers: corsHeaders }
     );
   }
 };
