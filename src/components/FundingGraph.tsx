@@ -87,7 +87,9 @@ export default function FundingGraph({ nodes, edges, onNodeClick }: FundingGraph
   const [simLinks, setSimLinks] = useState<SimLink[]>([]);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: SimNode } | null>(null);
-  const [svgWidth, setSvgWidth] = useState(800);
+  // Width is tracked via ref only — no state — so ResizeObserver updates
+  // don't trigger re-renders or restart the simulation.
+  const svgWidthRef = useRef(800);
 
   // Measure container width
   useEffect(() => {
@@ -95,20 +97,24 @@ export default function FundingGraph({ nodes, edges, onNodeClick }: FundingGraph
     if (!svg) return;
     const observer = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width;
-      if (w && w > 0) setSvgWidth(w);
+      if (w && w > 0) svgWidthRef.current = w;
     });
     observer.observe(svg.parentElement!);
-    setSvgWidth(svg.parentElement!.clientWidth);
+    svgWidthRef.current = svg.parentElement!.clientWidth;
     return () => observer.disconnect();
   }, []);
 
-  // Run d3-force simulation
+  // Run d3-force simulation — only restarts when nodes/edges change.
+  // Width is read from a ref so ResizeObserver updates don't restart the sim.
   useEffect(() => {
     if (nodes.length === 0) return;
 
+    // Read the live DOM width at setup time (most accurate on first render).
+    const w = svgRef.current?.parentElement?.clientWidth ?? svgWidthRef.current;
+
     const simNodeList: SimNode[] = nodes.map((n) => ({
       ...n,
-      x: svgWidth / 2 + (Math.random() - 0.5) * 100,
+      x: w / 2 + (Math.random() - 0.5) * 100,
       y: GRAPH_HEIGHT / 2 + (Math.random() - 0.5) * 100,
     }));
 
@@ -124,7 +130,7 @@ export default function FundingGraph({ nodes, edges, onNodeClick }: FundingGraph
     const sim = forceSimulation(simNodeList)
       .force("link", forceLink<SimNode, SimLink>(simLinkList).id((d) => d.id).distance(LINK_DISTANCE))
       .force("charge", forceManyBody().strength(BODY_STRENGTH))
-      .force("center", forceCenter(svgWidth / 2, GRAPH_HEIGHT / 2))
+      .force("center", forceCenter(w / 2, GRAPH_HEIGHT / 2))
       .force("collide", forceCollide<SimNode>().radius((d) => radiusScale(d.size) + 4))
       .alpha(0.8)
       .on("tick", () => {
@@ -133,7 +139,7 @@ export default function FundingGraph({ nodes, edges, onNodeClick }: FundingGraph
       });
 
     return () => { sim.stop(); };
-  }, [nodes, edges, svgWidth]);
+  }, [nodes, edges]); // svgWidth intentionally omitted — read via ref to avoid restart loop
 
   const radiusScale = useCallback(
     (size: number) => MIN_RADIUS + ((size - 1) / 9) * (MAX_RADIUS - MIN_RADIUS),

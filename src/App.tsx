@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { ScanResult, WalletScanResult, WalletType, ClassifiedWallet, ThreatEvent, ReplayResult } from "./lib/types";
 import {
   C, mono, sans, heading, display, GLOBAL_CSS, EASE,
@@ -146,6 +146,9 @@ export default function App() {
   const [walletResult, setWalletResult] = useState<WalletScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showGraph, setShowGraph] = useState(false);
+  const tokenGraphData = useMemo(() => (result ? buildTokenGraph(result) : null), [result]);
+  const [inputShake, setInputShake] = useState(false);
+  const scanInFlightRef = useRef(false);
   const [time, setTime] = useState(new Date());
   const [threats, setThreats] = useState<ThreatEvent[]>([]);
   const [threatsLoading, setThreatsLoading] = useState(false);
@@ -158,6 +161,33 @@ export default function App() {
   const [replayProgress, setReplayProgress] = useState(0);
   const [watching, setWatching] = useState(false);
   const [watchLoading, setWatchLoading] = useState(false);
+
+  // ── Browser history (back button support) ──
+
+  const navigateTo = useCallback((tool: ToolId) => {
+    setActiveTool(tool);
+    if (tool === "token") setInputMode("TOKEN");
+    if (tool === "wallet") setInputMode("WALLET");
+    history.pushState({ tool }, "");
+  }, []);
+
+  useEffect(() => {
+    // Seed history so the first back press goes to the current tool, not the previous page.
+    history.replaceState({ tool: "token" }, "");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const tool = (e.state as { tool?: ToolId } | null)?.tool;
+      if (tool && TOOLS.some((t) => t.id === tool)) {
+        setActiveTool(tool);
+        if (tool === "token") setInputMode("TOKEN");
+        if (tool === "wallet") setInputMode("WALLET");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -275,11 +305,17 @@ export default function App() {
   }, [replayInput]);
 
   const doScan = useCallback(async (overrideAddress?: string) => {
+    if (scanInFlightRef.current) return;
     const addr = (overrideAddress ?? inputVal).trim();
-    if (!addr) return;
+    if (!addr) {
+      setInputShake(true);
+      setTimeout(() => setInputShake(false), 500);
+      return;
+    }
 
     const isWallet = overrideAddress ? true : inputMode === "WALLET";
 
+    scanInFlightRef.current = true;
     setScanning(true);
     setError(null);
     setResult(null);
@@ -329,16 +365,16 @@ export default function App() {
       setError(err instanceof Error ? err.message : "Scan failed");
     } finally {
       clearInterval(phaseInterval);
+      scanInFlightRef.current = false;
       setScanning(false);
     }
   }, [inputVal, inputMode]);
 
   const handleWalletClick = useCallback((addr: string) => {
-    setActiveTool("wallet");
+    navigateTo("wallet");
     setInputVal(addr);
-    setInputMode("WALLET");
     doScan(addr);
-  }, [doScan]);
+  }, [navigateTo, doScan]);
 
   const formatThreatTime = (iso: string): string => {
     const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -425,9 +461,7 @@ export default function App() {
                   active={activeTool === tool.id}
                   onClick={() => {
                     if (!tool.ready) return;
-                    setActiveTool(tool.id);
-                    if (tool.id === "token") setInputMode("TOKEN");
-                    if (tool.id === "wallet") setInputMode("WALLET");
+                    navigateTo(tool.id);
                   }}
                 />
               ))}
@@ -474,19 +508,18 @@ export default function App() {
                 display: "flex",
                 alignItems: "center",
                 background: C.surface,
-                border: `1px solid ${C.border}`,
+                border: `1px solid ${inputShake ? C.red : C.border}`,
                 borderRadius: 7,
                 overflow: "hidden",
                 width: 420,
-                animation: scanning ? "scanPulse 2s ease-in-out infinite" : "none",
+                animation: inputShake ? "shake 0.4s ease-out" : scanning ? "scanPulse 2s ease-in-out infinite" : "none",
+                transition: "border-color 0.2s",
               }}
             >
               <button
                 onClick={() => {
                   if (scanning) return;
-                  const next = inputMode === "TOKEN" ? "WALLET" : "TOKEN";
-                  setInputMode(next);
-                  setActiveTool(next === "TOKEN" ? "token" : "wallet");
+                  navigateTo(inputMode === "TOKEN" ? "wallet" : "token");
                 }}
                 style={{
                   padding: "0 12px",
@@ -553,8 +586,8 @@ export default function App() {
         {/* ── SCAN VIEW ── */}
         {isScanView && (
           <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 28px" }}>
-            {/* Hero — only when no results and not scanning */}
-            {!result && !walletResult && !scanning && !error && (
+            {/* Hero — only when the active tool has no result yet */}
+            {!scanning && !error && (isTokenScan ? !result : !walletResult) && (
               <div style={{ paddingTop: 140, paddingBottom: 80, animation: "fadeIn 0.8s ease-out" }}>
                 <div
                   style={{
@@ -630,7 +663,7 @@ export default function App() {
             )}
 
             {/* Results — Frost card layout */}
-            {result && (
+            {isTokenScan && result && (
               <div style={{ animation: "fadeIn 0.5s ease-out", paddingBottom: 40 }}>
                 <Frost>
                   {/* Token header */}
@@ -780,10 +813,11 @@ export default function App() {
                   >
                     {showGraph ? "HIDE GRAPH" : "VIEW GRAPH"}
                   </button>
-                  {showGraph && result && (
+                  {showGraph && tokenGraphData && (
                     <div style={{ marginTop: 14 }}>
                       <GraphPanel
-                        {...buildTokenGraph(result)}
+                        nodes={tokenGraphData.nodes}
+                        edges={tokenGraphData.edges}
                         onNodeClick={handleWalletClick}
                         onClose={() => setShowGraph(false)}
                       />
@@ -794,12 +828,12 @@ export default function App() {
             )}
 
             {/* Wallet results */}
-            {walletResult && (
+            {isWalletScan && walletResult && (
               <WalletResults result={walletResult} onWalletClick={handleWalletClick} />
             )}
 
             {/* Feature cards — empty state */}
-            {!result && !walletResult && !scanning && !error && (
+            {!scanning && !error && (isTokenScan ? !result : !walletResult) && (
               <div
                 style={{
                   display: "grid",

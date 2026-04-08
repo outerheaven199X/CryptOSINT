@@ -95,9 +95,9 @@ export default function LeaderboardView({ onWalletClick }: LeaderboardViewProps)
 
         <div style={{ height: 1, background: C.border }} />
 
-        {/* Loading */}
+        {/* Loading — key={activeType} forces a fresh element (and fresh animation) on every new fetch */}
         {loading && (
-          <div style={{ padding: "40px 20px", textAlign: "center" }}>
+          <div key={activeType} style={{ padding: "40px 20px", textAlign: "center" }}>
             <div style={{ fontFamily: mono, fontSize: 13, color: C.sub }}>LOADING...</div>
             <div style={{ width: 200, height: 2, background: C.ghost, borderRadius: 2, margin: "10px auto", overflow: "hidden" }}>
               <div style={{ height: "100%", background: C.text, borderRadius: 2, width: "60%", animation: `barFill 1.4s ${EASE} forwards` }} />

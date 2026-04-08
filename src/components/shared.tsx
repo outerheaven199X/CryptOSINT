@@ -51,6 +51,7 @@ export const GLOBAL_CSS = `
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes staggerIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes barFill { from { width: 0%; } }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-5px); } 40%,80% { transform: translateX(5px); } }
   @keyframes scanPulse {
     0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.03); }
     50% { box-shadow: 0 0 24px 0 rgba(255,255,255,0.015); }

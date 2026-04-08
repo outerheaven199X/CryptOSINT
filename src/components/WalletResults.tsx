@@ -3,7 +3,7 @@
  * header (address + PNL), stats row, verdict, token table, funding graph.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { WalletScanResult, WalletTokenEntry } from "../lib/types";
 import {
   C,
@@ -50,6 +50,7 @@ export default function WalletResults({ result, onWalletClick }: WalletResultsPr
   const [sortField, setSortField] = useState<SortField>("pnlSol");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [showGraph, setShowGraph] = useState(false);
+  const graphData = useMemo(() => buildWalletGraph(result), [result]);
 
   const sorted = sortTokens(result.tokens, sortField, sortDir);
 
@@ -223,7 +224,8 @@ export default function WalletResults({ result, onWalletClick }: WalletResultsPr
         {showGraph && (
           <div style={{ marginTop: 14 }}>
             <GraphPanel
-              {...buildWalletGraph(result)}
+              nodes={graphData.nodes}
+              edges={graphData.edges}
               onNodeClick={onWalletClick}
               onClose={() => setShowGraph(false)}
             />

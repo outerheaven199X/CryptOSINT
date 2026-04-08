@@ -5,3 +5,4 @@ dist
 .dev.vars
 *.log
 *.tsbuildinfo
+TESTING_NOTES.md
