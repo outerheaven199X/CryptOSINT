@@ -59,7 +59,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       );
     }
 
-    const transactions = await getTransactionsForToken(address, apiKey, 500);
+    const transactions = await getTransactionsForToken(address, apiKey, 200);
 
     if (transactions.length === 0) {
       return new Response(
@@ -68,7 +68,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       );
     }
 
-    const uniqueMints = extractUniqueMints(transactions, address);
+    // Cap to the 20 most-traded tokens — each mint = 1 metadata fetch subrequest.
+    const uniqueMints = extractUniqueMints(transactions, address, 20);
     const metadata = await getTokenMetadataBatch(uniqueMints, apiKey);
     const tokens = classifyPerToken(transactions, address, uniqueMints, metadata);
     const associations = buildFundingGraph(transactions, address);
@@ -160,16 +161,21 @@ export const onRequestOptions: PagesFunction = async () => {
 function extractUniqueMints(
   txs: ParsedTransaction[],
   wallet: string,
+  cap = 20,
 ): string[] {
-  const mints = new Set<string>();
+  const counts = new Map<string, number>();
   for (const tx of txs) {
     for (const t of tx.tokenTransfers) {
       if (t.fromUserAccount === wallet || t.toUserAccount === wallet) {
-        mints.add(t.mint);
+        counts.set(t.mint, (counts.get(t.mint) ?? 0) + 1);
       }
     }
   }
-  return [...mints];
+  // Return most-traded tokens first, capped to limit metadata fetch subrequests.
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, cap)
+    .map(([mint]) => mint);
 }
 
 function classifyPerToken(
