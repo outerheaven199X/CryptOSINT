@@ -30,6 +30,15 @@ interface Env {
 const KV_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
 const KV_PREFIX = "wallet:";
 
+// ── Subrequest budget ──
+// Cloudflare free plan: 50 subrequests per invocation.
+// Every fetch() AND every KV read/write counts as one subrequest.
+// These caps keep the total safely under 50 even for busy tokens.
+const MAX_TX = 200;             // 2 fetch pages max (100 tx/page)
+const HISTORY_ATTACH_CAP = 5;  // KV reads in attachPriorHistory
+const ORIGIN_ENRICH_CAP = 5;   // KV reads + fetches + writes in enrichWithOrigins
+const KV_WRITE_CAP = 5;        // KV read+write pairs in writeClassificationsToKV
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -61,7 +70,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const metadata = await getTokenMetadata(mint, apiKey);
 
     // 2. Fetch full parsed transactions in one call per page
-    const transactions = await getTransactionsForToken(mint, apiKey, 500);
+    const transactions = await getTransactionsForToken(mint, apiKey, MAX_TX);
 
     if (transactions.length === 0) {
       return new Response(
@@ -212,7 +221,12 @@ async function enrichWithOrigins(
   apiKey: string,
   kv: KVNamespace,
 ): Promise<void> {
-  const flagged = wallets.filter((w) => FLAGGED_TYPES.has(w.type));
+  // Cap to top N flagged wallets by supply% — each uncached wallet costs
+  // one KV read + one Helius fetch + one KV write = 3 subrequests.
+  const flagged = wallets
+    .filter((w) => FLAGGED_TYPES.has(w.type))
+    .sort((a, b) => b.supplyPercent - a.supplyPercent)
+    .slice(0, ORIGIN_ENRICH_CAP);
   if (flagged.length === 0) return;
 
   // Check KV cache first
@@ -290,16 +304,25 @@ async function attachPriorHistory(
   wallets: ClassifiedWallet[],
   kv: KVNamespace,
 ): Promise<void> {
+  // Each kv.get() is one subrequest. Only check the top flagged wallets by
+  // supply% — organic wallets have no prior-history value for reputation anyway.
+  const targets = wallets
+    .filter((w) => FLAGGED_TYPES.has(w.type))
+    .sort((a, b) => b.supplyPercent - a.supplyPercent)
+    .slice(0, HISTORY_ATTACH_CAP);
+
+  if (targets.length === 0) return;
+
   const settled = await Promise.allSettled(
-    wallets.map((w) => kv.get(`${KV_PREFIX}${w.address}`, "json")),
+    targets.map((w) => kv.get(`${KV_PREFIX}${w.address}`, "json")),
   );
 
-  for (let i = 0; i < wallets.length; i++) {
+  for (let i = 0; i < targets.length; i++) {
     const outcome = settled[i];
     if (outcome.status !== "fulfilled" || !outcome.value) continue;
     const records = outcome.value as WalletRecord[];
     if (records.length === 0) continue;
-    wallets[i].priorHistory = records.map((r) => ({
+    targets[i].priorHistory = records.map((r) => ({
       tokenSymbol: r.tokenSymbol,
       classification: r.classification,
       timestamp: r.timestamp,
@@ -327,14 +350,24 @@ function attachReputationScores(wallets: ClassifiedWallet[]): void {
   }
 }
 
+const KV_WRITE_TYPES = new Set<string>(["INSIDER", "AGENT"]);
+
 async function writeClassificationsToKV(
   wallets: ClassifiedWallet[],
   tokenMint: string,
   tokenSymbol: string,
   kv: KVNamespace,
 ): Promise<void> {
+  // Each wallet costs 1 KV read + 1 KV write = 2 subrequests.
+  // Only persist INSIDER/AGENT (most useful for cross-token reputation)
+  // and cap the total to stay within the subrequest budget.
+  const toWrite = wallets
+    .filter((w) => KV_WRITE_TYPES.has(w.type))
+    .sort((a, b) => b.supplyPercent - a.supplyPercent)
+    .slice(0, KV_WRITE_CAP);
+
   const now = new Date().toISOString();
-  const writes = wallets.map(async (w) => {
+  const writes = toWrite.map(async (w) => {
     const key = `${KV_PREFIX}${w.address}`;
     const existing = ((await kv.get(key, "json")) as WalletRecord[] | null) ?? [];
     const alreadyRecorded = existing.some((r) => r.tokenMint === tokenMint);
