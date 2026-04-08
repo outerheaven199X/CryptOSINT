@@ -1,5 +1,4 @@
-# CryptOSINT
-
+<img src="https://i.imgur.com/HvDEHes.jpg" alt="banner" width="1000">
 Paste a Solana token address. CryptOSINT pulls the transaction history and classifies every wallet that touched it: insiders, bots, snipers, copy traders, and the actual humans.
 
 One number at the top tells you the organic score. The percentage of activity coming from real participants. The table below tells you everything else.
